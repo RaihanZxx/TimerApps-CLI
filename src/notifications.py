@@ -103,39 +103,39 @@ class NotificationManager:
     
     def send_limit_reached(self, app_name: str, limit_minutes: int) -> bool:
         """Send notification when app limit is reached."""
-        title = "TimerApps - Limit Reached"
-        content = f"{app_name} limit ({limit_minutes}m) exceeded. App is now blocked."
-        return self._send_notification(title, content, notification_id=100)
+        title = f"{app_name} - Limit Reached"
+        content = f"Limit ({limit_minutes}m) exceeded. App is now blocked."
+        return self._send_notification(title, content, notification_id=100, icon="@android:drawable/ic_dialog_alert")
     
     def send_warning(self, app_name: str, remaining_minutes: int) -> bool:
         """Send warning notification when time is running out."""
-        title = "TimerApps - Warning"
-        content = f"{app_name}: Only {remaining_minutes}m remaining!"
-        return self._send_notification(title, content, notification_id=101)
+        title = f"{app_name} - Warning"
+        content = f"Only {remaining_minutes}m remaining!"
+        return self._send_notification(title, content, notification_id=101, icon="@android:drawable/ic_dialog_alert")
     
     def send_limit_reset(self, app_name: str) -> bool:
         """Send notification when daily limit is reset."""
-        title = "TimerApps - Daily Reset"
-        content = f"{app_name} limit has been reset for today."
-        return self._send_notification(title, content, notification_id=102)
+        title = f"{app_name} - Daily Reset"
+        content = "Limit has been reset for today."
+        return self._send_notification(title, content, notification_id=102, icon="@android:drawable/ic_menu_close_clear_cancel")
     
     def send_app_unfrozen(self, app_name: str) -> bool:
         """Send notification when app is unfrozen."""
-        title = "TimerApps - App Unfrozen"
-        content = f"{app_name} is now available again."
-        return self._send_notification(title, content, notification_id=103)
+        title = f"{app_name} - Available"
+        content = "App is now available again."
+        return self._send_notification(title, content, notification_id=103, icon="@android:drawable/ic_menu_close_clear_cancel")
     
     def send_monitoring_started(self, app_count: int) -> bool:
         """Send notification when monitoring starts."""
-        title = "TimerApps - Monitoring Started"
-        content = f"Monitoring {app_count} app(s)"
-        return self._send_notification(title, content, notification_id=104)
+        title = "TimerApps Daemon"
+        content = f"Monitoring {app_count} app(s) started."
+        return self._send_notification(title, content, notification_id=104, icon="@android:drawable/ic_lock_idle_alarm")
     
     def send_monitoring_stopped(self) -> bool:
         """Send notification when monitoring stops."""
-        title = "TimerApps - Monitoring Stopped"
-        content = "All timers have been saved."
-        return self._send_notification(title, content, notification_id=105)
+        title = "TimerApps Daemon"
+        content = "Monitoring stopped. All timers saved."
+        return self._send_notification(title, content, notification_id=105, icon="@android:drawable/ic_lock_idle_alarm")
     
     def send_custom(self, title: str, content: str, 
                    notification_id: Optional[int] = None,

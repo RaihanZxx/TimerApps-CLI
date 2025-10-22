@@ -160,9 +160,10 @@ class AppMonitor:
                 # Send 5-minute warning notification
                 app_name = app_config["name"]
                 used_minutes = seconds_to_minutes(self._app_total_seconds[package])
+                title = f"{app_name} - 5 Minutes Left"
                 content = f"Used: {used_minutes}m / {app_config['limit_minutes']}m - Remaining: {remaining_minutes}m"
                 self.notify.send_custom(
-                    f"{app_name} - 5 Minutes Left",
+                    title,
                     content,
                     icon="@android:drawable/ic_dialog_alert"
                 )
