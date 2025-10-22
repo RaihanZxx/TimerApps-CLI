@@ -108,8 +108,16 @@ class NotificationManager:
     
     def _send_notification_via_adb(self, title: str, content: str,
                                   notification_id: Optional[int] = None,
-                                  action: bool = False) -> bool:
-        """Send notification via ADB using Termux API broadcast."""
+                                  action: bool = False, icon: Optional[str] = None) -> bool:
+        """Send notification via ADB using Android notification service.
+        
+        Args:
+            title: Notification title
+            content: Notification content/description
+            notification_id: Optional notification ID for grouping
+            action: Whether to include action (unused for now)
+            icon: Optional icon in format @android:drawable/icon_name
+        """
         if not self.adb_device:
             log_message("ADB device not available for notification", "WARN")
             return False
@@ -117,7 +125,29 @@ class NotificationManager:
         try:
             import urllib.parse
             
-            # Method 1: Use am broadcast to Termux API with proper shell escaping
+            # Method 1: Use cmd notification post (most reliable on Android 8+)
+            tag = f"timerapps_{notification_id if notification_id else 'default'}"
+            cmd = [
+                "adb", "-s", self.adb_device, "shell",
+                "cmd", "notification", "post",
+                "-t", title,
+                "-S", "bigtext",
+            ]
+            
+            # Add icon if provided
+            if icon:
+                cmd.extend(["-i", icon])
+            
+            cmd.extend([tag, content])
+            
+            result = subprocess.run(cmd, capture_output=True, timeout=5)
+            
+            if result.returncode == 0:
+                log_message(f"Notification posted (cmd service): {title}")
+                return True
+            
+            # Fallback Method 2: Try am broadcast to Termux API
+            log_message(f"cmd notification failed, trying broadcast...", "DEBUG")
             shell_cmd = (
                 f"am broadcast -n com.termux.api/.apis.NotificationAPI "
                 f"-e title '{title}' "
@@ -135,11 +165,10 @@ class NotificationManager:
             
             if result.returncode == 0:
                 log_message(f"Notification queued (ADB API): {title}")
-                # Broadcast accepted by system, even if receiver may not process
                 return True
             
-            # Fallback: Try URI scheme with URL encoding for special chars
-            log_message(f"Method 1 not responsive, trying fallback...", "DEBUG")
+            # Fallback Method 3: Try URI scheme with URL encoding
+            log_message(f"Broadcast failed, trying URI scheme...", "DEBUG")
             title_enc = urllib.parse.quote(title)
             content_enc = urllib.parse.quote(content)
             uri = f"termux://notification?title={title_enc}&text={content_enc}"
@@ -158,7 +187,7 @@ class NotificationManager:
                 log_message(f"Notification queued (ADB URI): {title}")
                 return True
             
-            # Final fallback: Try direct command
+            # Final Fallback Method 4: Try direct termux command
             shell_cmd = (
                 f"termux-notification --title '{title}' --content '{content}'"
             )
@@ -169,16 +198,15 @@ class NotificationManager:
             result = subprocess.run(cmd, capture_output=True, timeout=5)
             
             if result.returncode == 0:
-                log_message(f"Notification sent (ADB shell): {title}")
+                log_message(f"Notification sent (shell): {title}")
                 return True
             else:
                 error_msg = result.stderr.decode() if result.stderr else result.stdout.decode()
-                log_message(f"ADB notification methods attempted: {error_msg}", "DEBUG")
-                # Return True anyway as we attempted via broadcast
-                return True
+                log_message(f"All notification methods attempted: {error_msg}", "DEBUG")
+                return True  # Attempted at least once
         except Exception as e:
             log_message(f"Error sending ADB notification: {e}", "DEBUG")
-            return True  # Return True as we attempted
+            return True  # Attempted despite error
     
     def _send_notification(self, title: str, content: str, 
                           notification_id: Optional[int] = None,
