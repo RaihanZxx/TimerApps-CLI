@@ -3,12 +3,14 @@ import sys
 import time
 import os
 import signal
+from pathlib import Path
 from typing import Optional
 
 from ..config_manager import ConfigManager
 from ..adb_handler import ADBHandler
 from ..app_monitor import AppMonitor
 from ..notifications import NotificationManager
+from ..daemon_manager import DaemonManager
 from ..utils import format_time, get_progress_bar, log_message
 
 
@@ -348,10 +350,12 @@ def adb_auth() -> None:
 
 @cli.command()
 def start() -> None:
-    """Start monitoring apps in background.
+    """Start monitoring apps in foreground.
     
     This will continuously monitor and block apps based on set limits.
     Press Ctrl+C to stop.
+    
+    For background monitoring, use: timer daemon start
     """
     init_managers(skip_monitor=False)
     
@@ -365,9 +369,10 @@ def start() -> None:
         click.echo("  timer set com.app.name 60")
         sys.exit(1)
     
-    click.secho("\n🚀 Starting monitoring...", fg="green", bold=True)
+    click.secho("\n🚀 Starting monitoring (foreground)...", fg="green", bold=True)
     click.echo(f"📱 Monitoring {len(apps)} app(s)")
-    click.echo("Press Ctrl+C to stop\n")
+    click.echo("Press Ctrl+C to stop")
+    click.echo("Tip: Use 'timer daemon start' for background monitoring\n")
     
     # Enable notifications
     if notify:
@@ -398,6 +403,198 @@ def start() -> None:
         click.secho(f"\n❌ Error: {e}", fg="red")
         if monitor and monitor.is_running():
             monitor.stop()
+        sys.exit(1)
+
+
+@cli.group()
+def daemon() -> None:
+    """Daemon management for background monitoring.
+    
+    Run monitoring as a background daemon process that persists
+    even when terminal is closed.
+    
+    Examples:
+      timer daemon start     # Start background monitoring
+      timer daemon stop      # Stop background monitoring
+      timer daemon status    # Check daemon status
+      timer daemon restart   # Restart daemon
+    """
+    pass
+
+
+@daemon.command("start")
+def daemon_start() -> None:
+    """Start monitoring as background daemon.
+    
+    This properly daemonizes the process, making it persist even when
+    terminal or parent shell is closed. Perfect for chroot environments.
+    
+    The daemon will:
+    - Run in background
+    - Survive terminal closure
+    - Continue monitoring across reboots (if init system manages it)
+    - Log to ~/.timerapps/daemon.log
+    """
+    init_managers(skip_monitor=True)
+    
+    if not config_mgr:
+        click.secho("Error: Failed to initialize", fg="red")
+        sys.exit(1)
+    
+    apps = config_mgr.get_all_apps()
+    if not apps:
+        click.secho("Error: No apps configured. Add apps first with:", fg="red")
+        click.echo("  timer set com.app.name 60")
+        sys.exit(1)
+    
+    daemon_mgr = DaemonManager()
+    
+    # Check if already running
+    status = daemon_mgr.get_status()
+    if status["running"]:
+        click.secho(f"✓ Daemon already running (PID: {status['pid']})", fg="yellow")
+        return
+    
+    click.secho("🚀 Starting daemon...", fg="green", bold=True)
+    click.echo(f"📱 Monitoring {len(apps)} app(s)")
+    
+    try:
+        # Start daemon
+        if daemon_mgr.start_daemon():
+            click.secho("✓ Daemon started successfully", fg="green")
+            click.echo(f"  PID: {daemon_mgr.get_daemon_pid()}")
+            click.echo(f"  Log: {status['log_file']}")
+            click.echo("\nView logs with: tail -f ~/.timerapps/daemon.log")
+            click.echo("Stop daemon with: timer daemon stop")
+        else:
+            click.secho("✗ Failed to start daemon", fg="red")
+            sys.exit(1)
+        
+        # Run monitoring in daemon
+        daemon_mgr.run_monitoring()
+    
+    except Exception as e:
+        click.secho(f"Error: {e}", fg="red")
+        sys.exit(1)
+
+
+@daemon.command("stop")
+def daemon_stop() -> None:
+    """Stop background daemon."""
+    daemon_mgr = DaemonManager()
+    status = daemon_mgr.get_status()
+    
+    if not status["running"]:
+        click.secho("✓ Daemon is not running", fg="yellow")
+        return
+    
+    click.secho(f"⏹️  Stopping daemon (PID: {status['pid']})...", fg="yellow")
+    
+    if daemon_mgr.stop_daemon():
+        click.secho("✓ Daemon stopped", fg="green")
+    else:
+        click.secho("✗ Failed to stop daemon", fg="red")
+        sys.exit(1)
+
+
+@daemon.command("status")
+def daemon_status() -> None:
+    """Check daemon status."""
+    daemon_mgr = DaemonManager()
+    status = daemon_mgr.get_status()
+    
+    click.secho("\n📊 Daemon Status:", bold=True, fg="cyan")
+    click.echo("─" * 50)
+    
+    if status["running"]:
+        click.secho(f"Status: ✓ RUNNING", fg="green")
+        click.echo(f"PID: {status['pid']}")
+    else:
+        click.secho(f"Status: ✗ STOPPED", fg="red")
+    
+    click.echo(f"Log File: {status['log_file']}")
+    click.echo(f"PID File: {status['pid_file']}")
+    
+    # Show recent logs if available
+    log_path = Path(status['log_file'])
+    if log_path.exists() and log_path.stat().st_size > 0:
+        click.echo("\n📝 Recent Logs (last 10 lines):")
+        click.echo("─" * 50)
+        try:
+            lines = log_path.read_text().strip().split('\n')[-10:]
+            for line in lines:
+                click.echo(f"  {line}")
+        except Exception as e:
+            click.echo(f"  Error reading logs: {e}")
+    
+    click.echo()
+
+
+@daemon.command("restart")
+def daemon_restart() -> None:
+    """Restart background daemon."""
+    daemon_mgr = DaemonManager()
+    status = daemon_mgr.get_status()
+    
+    if status["running"]:
+        click.secho(f"⏹️  Stopping daemon (PID: {status['pid']})...", fg="yellow")
+        daemon_mgr.stop_daemon()
+        time.sleep(1)
+    
+    click.secho("🚀 Starting daemon...", fg="green", bold=True)
+    
+    try:
+        if daemon_mgr.start_daemon():
+            click.secho("✓ Daemon restarted successfully", fg="green")
+            click.echo(f"  New PID: {daemon_mgr.get_daemon_pid()}")
+            
+            # Run monitoring
+            daemon_mgr.run_monitoring()
+        else:
+            click.secho("✗ Failed to restart daemon", fg="red")
+            sys.exit(1)
+    except Exception as e:
+        click.secho(f"Error: {e}", fg="red")
+        sys.exit(1)
+
+
+@daemon.command("logs")
+@click.option("-f", "--follow", is_flag=True, help="Follow log file (like tail -f)")
+@click.option("-n", "--lines", type=int, default=50, help="Number of lines to show")
+def daemon_logs(follow: bool, lines: int) -> None:
+    """View daemon logs."""
+    daemon_mgr = DaemonManager()
+    log_path = Path(daemon_mgr.daemon_log)
+    
+    if not log_path.exists():
+        click.secho("No log file found", fg="yellow")
+        return
+    
+    try:
+        if follow:
+            # Use tail -f if available
+            try:
+                os.execvp("tail", ["tail", "-f", str(log_path)])
+            except FileNotFoundError:
+                # Fallback for systems without tail
+                click.secho("Following logs (Ctrl+C to stop)...", fg="cyan")
+                try:
+                    while True:
+                        content = log_path.read_text()
+                        log_lines = content.strip().split('\n')[-lines:]
+                        for line in log_lines:
+                            click.echo(line)
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    pass
+        else:
+            # Show last N lines
+            content = log_path.read_text()
+            log_lines = content.strip().split('\n')[-lines:]
+            for line in log_lines:
+                click.echo(line)
+    except Exception as e:
+        click.secho(f"Error reading logs: {e}", fg="red")
         sys.exit(1)
 
 
