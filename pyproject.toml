@@ -1,0 +1,47 @@
+[project]
+name = "TimerApps-CLI"
+version = "0.0.1"
+authors = [
+  { name="RaihanZxx", email="raihanzxzy@gmail.com" },
+]
+description = "your app timer to reduce distractions and increase productivity."
+readme = "README.md"
+license = { file="LICENSE" }
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Productivity :: Self-improvement",
+    "Development Status :: 0.0.1 - Release",
+]
+
+dependencies = [
+    "textual",
+    "click"
+]
+
+[project.urls]
+Homepage = "https://github.com/RaihanZxx/TimerApps-CLI"
+Issues = "https://github.com/RaihanZxx/TimerApps-CLI/issues"
+
+[project.scripts]
+timer = "src.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src", "."]
+
+[tool.pytest.ini_options]
+cache_dir = ".cache/pytest"
+
+[tool.ruff]
+cache-dir = ".cache/ruff"
+
+[tool.pyright]
+cache-dir = ".cache/pyright"
+venvPath = "."
+venv = ".venv"
+
+[tool.isort]
+profile = "black"
+
