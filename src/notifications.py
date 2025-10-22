@@ -67,17 +67,16 @@ class NotificationManager:
         
         try:
             tag = f"timerapps_{notification_id if notification_id else 'default'}"
-            cmd = [
-                "adb", "-s", self.adb_device, "shell",
-                "cmd", "notification", "post",
-                "-t", title,
-                "-S", "bigtext",
-            ]
+            
+            # Build shell command as string to ensure proper escaping
+            shell_cmd = f'cmd notification post -t "{title}" -S bigtext'
             
             if icon:
-                cmd.extend(["-i", icon])
+                shell_cmd += f' -i "{icon}"'
             
-            cmd.extend([tag, content])
+            shell_cmd += f' {tag} "{content}"'
+            
+            cmd = ["adb", "-s", self.adb_device, "shell", shell_cmd]
             
             result = subprocess.run(cmd, capture_output=True, timeout=5)
             
@@ -93,13 +92,14 @@ class NotificationManager:
             return False
     
     def _send_notification(self, title: str, content: str, 
-                          notification_id: Optional[int] = None) -> bool:
+                          notification_id: Optional[int] = None,
+                          icon: Optional[str] = None) -> bool:
         """Send notification via Android notification service."""
         if not self.enabled:
             log_message(f"Notification (disabled): {title} - {content}")
             return False
         
-        return self._send_notification_via_adb(title, content, notification_id)
+        return self._send_notification_via_adb(title, content, notification_id, icon)
     
     def send_limit_reached(self, app_name: str, limit_minutes: int) -> bool:
         """Send notification when app limit is reached."""
@@ -138,6 +138,7 @@ class NotificationManager:
         return self._send_notification(title, content, notification_id=105)
     
     def send_custom(self, title: str, content: str, 
-                   notification_id: Optional[int] = None) -> bool:
-        """Send custom notification."""
-        return self._send_notification(title, content, notification_id)
+                   notification_id: Optional[int] = None,
+                   icon: Optional[str] = None) -> bool:
+        """Send custom notification with optional icon."""
+        return self._send_notification(title, content, notification_id, icon)

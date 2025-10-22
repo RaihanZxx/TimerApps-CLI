@@ -35,6 +35,7 @@ class AppMonitor:
         self._app_states: Dict[str, TimerState] = {}
         self._app_session_start: Dict[str, float] = {}
         self._app_total_seconds: Dict[str, int] = {}  # Total seconds used today
+        self._app_5min_warning_sent: Set[str] = set()  # Track which apps sent 5min warning
         
         self._check_interval = config_manager.config["settings"]["check_interval"]
     
@@ -98,6 +99,7 @@ class AppMonitor:
                     self._app_total_seconds.clear()
                     self._app_session_start.clear()
                     self._app_states.clear()
+                    self._app_5min_warning_sent.clear()
                     log_message("Daily reset performed - all apps unfrozen")
                 
                 # Get currently active app
@@ -149,6 +151,23 @@ class AppMonitor:
                 self._app_states[package] = TimerState.MONITORING
                 self._app_session_start[package] = time.time()
                 log_message(f"Start monitoring: {package}")
+            
+            # Check if 5 minutes remaining (send warning once)
+            remaining_seconds = limit_seconds - self._app_total_seconds[package]
+            remaining_minutes = seconds_to_minutes(remaining_seconds)
+            
+            if remaining_minutes <= 5 and remaining_minutes > 0 and package not in self._app_5min_warning_sent:
+                # Send 5-minute warning notification
+                app_name = app_config["name"]
+                used_minutes = seconds_to_minutes(self._app_total_seconds[package])
+                content = f"Used: {used_minutes}m / {app_config['limit_minutes']}m - Remaining: {remaining_minutes}m"
+                self.notify.send_custom(
+                    f"{app_name} - 5 Minutes Left",
+                    content,
+                    icon="@android:drawable/ic_dialog_alert"
+                )
+                self._app_5min_warning_sent.add(package)
+                log_message(f"5-minute warning sent for {app_name}")
             
             # Check if limit reached
             if self._app_total_seconds[package] >= limit_seconds:

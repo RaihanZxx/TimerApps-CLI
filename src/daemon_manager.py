@@ -187,6 +187,13 @@ class DaemonManager:
         monitor = AppMonitor(config_mgr, adb, notify)
         
         try:
+            # Send daemon started notification
+            apps_count = len(config_mgr.get_all_apps())
+            notify.send_custom(
+                "TimerApps Daemon",
+                f"✅ Monitoring started ({apps_count} app(s))"
+            )
+            
             monitor.start()
             
             # Keep running
@@ -195,6 +202,11 @@ class DaemonManager:
         
         except KeyboardInterrupt:
             log_message("Daemon interrupted")
+            # Send daemon stopped notification
+            notify.send_custom(
+                "TimerApps Daemon",
+                "⏹️ Monitoring stopped"
+            )
             if monitor.is_running():
                 monitor.stop()
         except Exception as e:
