@@ -161,6 +161,16 @@ class ConfigManager:
         log_message(f"Updated {package} name to {name}")
         return True
     
+    def update_app_action(self, package: str, action: str) -> bool:
+        """Update app action (kill or freeze)."""
+        if package not in self.config["apps"]:
+            return False
+        
+        self.config["apps"][package]["action"] = action
+        self.save_config()
+        log_message(f"Updated {package} action to {action}")
+        return True
+    
     def get_app(self, package: str) -> Optional[Dict]:
         """Get app config by package name."""
         return self.config["apps"].get(package)

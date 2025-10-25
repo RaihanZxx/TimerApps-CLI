@@ -79,6 +79,7 @@ def set(package: str, limit_minutes: int, verbose: bool, action: str, name: str)
     if package in config_mgr.get_all_apps():
         config_mgr.update_app_limit(package, limit_minutes)
         config_mgr.update_app_name(package, app_name)
+        config_mgr.update_app_action(package, action)
         msg = f"Updated: {app_name} → {limit_minutes}m"
     else:
         config_mgr.add_app(package, app_name, limit_minutes, action)
