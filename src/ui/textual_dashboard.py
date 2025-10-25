@@ -35,13 +35,11 @@ class DashboardScreen(Screen):
         yield Header()
         with Vertical():
             yield Static("🚀 TimerApps-CLI Dashboard", id="title")
-            with Horizontal():
-                yield Static("Quick Stats:", id="stats-label", classes="section-header")
+            yield Static("Quick Stats:", id="stats-label", classes="section-header")
             with Container(id="stats-container"):
                 yield Static("Loading stats...", id="stats-content")
             
-            with Horizontal():
-                yield Static("Monitored Apps:", id="apps-label", classes="section-header")
+            yield Static("Monitored Apps:", id="apps-label", classes="section-header")
             yield DataTable(id="apps-table")
             
             with Horizontal():
@@ -483,7 +481,8 @@ def run_interactive(config_mgr: ConfigManager, adb: ADBHandler,
             color: $text;
             width: 100%;
             text-align: center;
-            padding: 1;
+            padding: 0 1;
+            height: 3;
             dock: top;
         }
         
@@ -491,13 +490,14 @@ def run_interactive(config_mgr: ConfigManager, adb: ADBHandler,
             background: $panel;
             width: 100%;
             padding: 0 1;
+            height: auto;
         }
         
         #stats-container {
             border: solid $accent;
             width: 100%;
-            height: 8;
-            padding: 1;
+            height: auto;
+            padding: 0 1;
         }
         
         #apps-table {
@@ -507,7 +507,8 @@ def run_interactive(config_mgr: ConfigManager, adb: ADBHandler,
         }
         
         Horizontal {
-            margin: 1 2;
+            margin: 0 1;
+            height: auto;
         }
         
         Button {
