@@ -28,31 +28,44 @@ class AppMonitor:
         
         self._running = False
         self._thread: Optional[threading.Thread] = None
-        self._lock = threading.RLock()
+        self._lock = threading.RLock()  # Global lock for critical sections
+        self._app_locks: Dict[str, threading.RLock] = {}  # Per-app locks for fine-grained synchronization
         
         # App tracking state
         self._last_active_app: Optional[str] = None
         self._app_states: Dict[str, TimerState] = {}
-        self._app_session_start: Dict[str, float] = {}
+        self._app_session_start: Dict[str, Optional[float]] = {}
         self._app_total_seconds: Dict[str, int] = {}  # Total seconds used today
         self._app_5min_warning_sent: Set[str] = set()  # Track which apps sent 5min warning
         
         self._check_interval = config_manager.config["settings"]["check_interval"]
     
+    def _get_app_lock(self, package: str) -> threading.RLock:
+        """Get or create per-app lock (thread-safe)."""
+        with self._lock:
+            if package not in self._app_locks:
+                self._app_locks[package] = threading.RLock()
+            return self._app_locks[package]
+    
     def _initialize_app_state(self, package: str) -> None:
-        """Initialize tracking state for an app."""
-        if package not in self._app_states:
-            self._app_states[package] = TimerState.INACTIVE
-            self._app_session_start[package] = None
-            
-            # Load from database if available
-            used = self.config.get_total_usage(package)
-            self._app_total_seconds[package] = used * 60
+        """Initialize tracking state for an app (thread-safe)."""
+        lock = self._get_app_lock(package)
+        with lock:
+            if package not in self._app_states:
+                self._app_states[package] = TimerState.INACTIVE
+                self._app_session_start[package] = None
+                
+                # Load from database if available
+                used = self.config.get_total_usage(package)
+                self._app_total_seconds[package] = used * 60
     
     def _update_total_usage(self) -> None:
-        """Update all app usage in database."""
+        """Update all app usage in database (thread-safe atomic writes)."""
         today = get_today_date()
-        for package, total_seconds in self._app_total_seconds.items():
+        with self._lock:  # Atomic snapshot of all app times
+            updates = dict(self._app_total_seconds)
+        
+        for package, total_seconds in updates.items():
             minutes = seconds_to_minutes(total_seconds)
             self.config.update_app_usage(package, minutes)
     
@@ -120,70 +133,73 @@ class AppMonitor:
             log_message(f"Monitor loop error: {e}", "ERROR")
     
     def _update_app_state(self, package: str, current_active: Optional[str]) -> None:
-        """Update state for a single app."""
+        """Update state for a single app (thread-safe per-app locking)."""
         app_config = self.config.get_app(package)
         if not app_config or not app_config["enabled"]:
             return
         
-        current_state = self._app_states.get(package, TimerState.INACTIVE)
-        is_active = current_active == package
-        used_seconds = self._app_total_seconds.get(package, 0)
-        limit_seconds = app_config["limit_minutes"] * 60
+        lock = self._get_app_lock(package)
+        with lock:
+            current_state = self._app_states.get(package, TimerState.INACTIVE)
+            is_active = current_active == package
+            used_seconds = self._app_total_seconds.get(package, 0)
+            limit_seconds = app_config["limit_minutes"] * 60
         
-        # STATE MACHINE
-        if is_active:
-            if current_state == TimerState.BLOCKED:
-                # Stay blocked
-                pass
-            elif current_state == TimerState.PAUSED:
-                # Resume timer
-                self._app_states[package] = TimerState.MONITORING
-                self._app_session_start[package] = time.time()
-                log_message(f"Resume monitoring: {package}")
-            elif current_state == TimerState.MONITORING:
-                # Continue monitoring, update time
-                if self._app_session_start[package]:
-                    elapsed = time.time() - self._app_session_start[package]
-                    self._app_total_seconds[package] += int(elapsed)
+            # STATE MACHINE - All transitions within lock
+            if is_active:
+                if current_state == TimerState.BLOCKED:
+                    # Stay blocked
+                    pass
+                elif current_state == TimerState.PAUSED:
+                    # Resume timer
+                    self._app_states[package] = TimerState.MONITORING
                     self._app_session_start[package] = time.time()
-            else:  # INACTIVE
-                # Start monitoring
-                self._app_states[package] = TimerState.MONITORING
-                self._app_session_start[package] = time.time()
-                log_message(f"Start monitoring: {package}")
-            
-            # Check if 5 minutes remaining (send warning once)
-            remaining_seconds = limit_seconds - self._app_total_seconds[package]
-            remaining_minutes = seconds_to_minutes(remaining_seconds)
-            
-            if remaining_minutes <= 5 and remaining_minutes > 0 and package not in self._app_5min_warning_sent:
-                # Send 5-minute warning notification
-                app_name = app_config["name"]
-                used_minutes = seconds_to_minutes(self._app_total_seconds[package])
-                title = f"{app_name} - 5 Minutes Left"
-                content = f"Used: {used_minutes}m / {app_config['limit_minutes']}m - Remaining: {remaining_minutes}m"
-                self.notify.send_custom(
-                    title,
-                    content,
-                    icon="@android:drawable/ic_dialog_alert"
-                )
-                self._app_5min_warning_sent.add(package)
-                log_message(f"5-minute warning sent for {app_name}")
-            
-            # Check if limit reached
-            if self._app_total_seconds[package] >= limit_seconds:
-                self._enforce_limit(package, app_config)
-        else:
-            # App not active
-            if current_state == TimerState.MONITORING:
-                # Pause timer
-                if self._app_session_start[package]:
-                    elapsed = time.time() - self._app_session_start[package]
-                    self._app_total_seconds[package] += int(elapsed)
-                    self._app_session_start[package] = None
+                    log_message(f"Resume monitoring: {package}")
+                elif current_state == TimerState.MONITORING:
+                    # Continue monitoring, update time
+                    if self._app_session_start[package] is not None:
+                        elapsed = time.time() - self._app_session_start[package]
+                        self._app_total_seconds[package] += int(elapsed)
+                        self._app_session_start[package] = time.time()
+                else:  # INACTIVE
+                    # Start monitoring
+                    self._app_states[package] = TimerState.MONITORING
+                    self._app_session_start[package] = time.time()
+                    log_message(f"Start monitoring: {package}")
                 
-                self._app_states[package] = TimerState.PAUSED
-                log_message(f"Pause monitoring: {package} (used: {seconds_to_minutes(self._app_total_seconds[package])}m)")
+                # Check if 5 minutes remaining (send warning once)
+                remaining_seconds = limit_seconds - self._app_total_seconds[package]
+                remaining_minutes = seconds_to_minutes(remaining_seconds)
+                
+                if remaining_minutes <= 5 and remaining_minutes > 0 and package not in self._app_5min_warning_sent:
+                    # Send 5-minute warning notification
+                    app_name = app_config["name"]
+                    used_minutes = seconds_to_minutes(self._app_total_seconds[package])
+                    title = f"{app_name} - 5 Minutes Left"
+                    content = f"Used: {used_minutes}m / {app_config['limit_minutes']}m - Remaining: {remaining_minutes}m"
+                    if self.notify:
+                        self.notify.send_custom(
+                            title,
+                            content,
+                            icon="@android:drawable/ic_dialog_alert"
+                        )
+                    self._app_5min_warning_sent.add(package)
+                    log_message(f"5-minute warning sent for {app_name}")
+                
+                # Check if limit reached
+                if self._app_total_seconds[package] >= limit_seconds:
+                    self._enforce_limit(package, app_config)
+            else:
+                # App not active
+                if current_state == TimerState.MONITORING:
+                    # Pause timer
+                    if self._app_session_start[package] is not None:
+                        elapsed = time.time() - self._app_session_start[package]
+                        self._app_total_seconds[package] += int(elapsed)
+                        self._app_session_start[package] = None
+                    
+                    self._app_states[package] = TimerState.PAUSED
+                    log_message(f"Pause monitoring: {package} (used: {seconds_to_minutes(self._app_total_seconds[package])}m)")
     
     def _enforce_limit(self, package: str, app_config: Dict) -> None:
         """Enforce app limit by killing or freezing."""
